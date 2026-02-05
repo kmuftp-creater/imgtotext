@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>圖轉文小幫手</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // 設定 PDF.js worker
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    <style>
+        /* 基本樣式和動畫 */
+        body {
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            color: #334155;
+            background-color: #f1f5f9;
+        }
+        .header {
+            background-color: #ffffff;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .main-container {
+            height: calc(100vh - 81px); /* 視窗高度減去標頭高度 */
+        }
+        .thumbnail-item {
+            position: relative;
+            border: 2px solid transparent;
+            transition: all 0.2s ease-in-out;
+        }
+        .thumbnail-item.selected {
+            border-color: #3b82f6;
+            box-shadow: 0 4px 14px 0 rgba(59, 130, 246, 0.5);
+        }
+        .loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+        /* 拖曳上傳遮罩 */
+        #drag-overlay {
+            background-color: rgba(59, 130, 246, 0.1);
+            border: 4px dashed #3b82f6;
+            pointer-events: none; /* 讓事件穿透，避免閃爍 */
+            z-index: 50;
+        }
+        
+        /* 美化捲軸 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 relative">
+
+    <!-- 拖曳上傳提示遮罩 -->
+    <div id="drag-overlay" class="fixed inset-0 hidden flex items-center justify-center">
+        <div class="bg-white p-6 rounded-xl shadow-2xl flex flex-col items-center animate-bounce">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 text-blue-500 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <h2 class="text-2xl font-bold text-blue-600">釋放滑鼠以上傳檔案</h2>
+        </div>
+    </div>
+
+    <div id="app" class="flex flex-col h-screen">
+        <!-- 第一部份：固定標頭 -->
+        <header class="header shadow-md p-4 flex justify-between items-center shrink-0 z-20 relative">
+            <div class="flex items-center gap-4">
+                <h1 class="text-2xl font-bold text-slate-700">圖轉文小幫手 <span class="text-xs font-normal text-slate-400 align-middle">v1.4.0</span></h1>
+                <div class="flex items-center gap-2">
+                    <input type="file" id="file-upload" class="hidden" multiple accept="image/*,application/pdf">
+                    
+                    <!-- 新增檔案按鈕 (取代原本的大按鈕) -->
+                    <button id="add-btn" class="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg transition-transform duration-200 active:scale-95 shadow-sm" title="新增檔案">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                        </svg>
+                    </button>
+
+                    <button id="clear-btn" class="bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold p-2 rounded-lg transition-colors duration-200" title="清除所有內容">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 右側功能區 -->
+            <div class="flex items-center gap-3">
+                 <div id="processing-status" class="text-sm text-slate-600 font-medium hidden">
+                    <div class="flex items-center gap-2 mr-2">
+                        <svg class="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span id="status-text">處理中...</span>
+                    </div>
+                </div>
+                
+                <!-- 停止按鈕 (處理中才顯示) -->
+                <button id="stop-btn" class="hidden bg-red-100 hover:bg-red-200 text-red-600 font-bold py-2 px-3 rounded-lg border border-red-200 transition-colors duration-200 flex items-center gap-1">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    停止
+                </button>
+
+                <!-- 下載按鈕組 -->
+                <div class="relative group">
+                    <button id="download-menu-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2" disabled>
+                        <span>下載結果</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform duration-200" id="download-arrow" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                    <!-- 下載選單 (隱藏/顯示) -->
+                    <div id="download-dropdown" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-slate-100 py-1">
+                        <button class="download-option w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between" data-format="md">
+                            下載 Markdown (.md)
+                            <span class="text-xs bg-slate-100 text-slate-500 px-1 rounded">預設</span>
+                        </button>
+                        <button class="download-option w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100" data-format="txt">
+                            下載純文字 (.txt)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主要內容區 -->
+        <main class="main-container flex-1 flex p-4 gap-4 overflow-hidden z-10">
+            <!-- 第二部份：左側縮圖區 -->
+            <aside id="thumbnail-panel" class="w-1/4 bg-white p-4 rounded-xl shadow-lg overflow-y-auto flex flex-col relative">
+                
+                <!-- Placeholder 獨立出來，不放在 thumbnail-grid 內，避免被 innerHTML='' 清除 -->
+                <div id="thumbnail-placeholder" class="absolute inset-0 z-10 bg-white p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition-colors rounded-xl">
+                    <div class="border-2 border-dashed border-slate-300 rounded-xl p-8 w-full h-full flex flex-col items-center justify-center pointer-events-none">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-12 w-12 mb-2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 002-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <p class="font-medium text-slate-500">點擊此處或上方按鈕上傳</p>
+                        <p class="text-sm my-1 text-slate-400">或</p>
+                        <p class="font-medium text-blue-500">拖曳檔案至此</p>
+                        <p class="text-xs mt-2 text-slate-400">支援 JPG, PNG, PDF (自動分頁)</p>
+                    </div>
+                </div>
+
+                <div id="thumbnail-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-4 hidden z-20 pb-4">
+                    <!-- 縮圖項目將會動態插入這裡 -->
+                </div>
+
+            </aside>
+
+            <!-- 第三部份：右側文字顯示區 -->
+            <section class="w-3/4 bg-white p-4 rounded-xl shadow-lg flex flex-col">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <span class="text-lg font-bold text-slate-700">轉換結果</span>
+                    <div class="flex items-center bg-slate-200 rounded-lg p-1">
+                        <button data-mode="txt" class="display-mode-btn bg-blue-500 text-white rounded-md py-1 px-3 text-sm font-semibold transition-colors">純文字 (TXT)</button>
+                        <button data-mode="md" class="display-mode-btn text-slate-600 hover:text-slate-800 rounded-md py-1 px-3 text-sm font-semibold transition-colors">Markdown (MD)</button>
+                    </div>
+                </div>
+                <div id="output-panel" class="flex-1 overflow-y-auto pr-2">
+                    <div id="output-placeholder" class="h-full flex flex-col justify-center items-center text-slate-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p class="mt-2">轉換後的文字將會顯示於此</p>
+                    </div>
+                </div>
+                
+                 <!-- 頁腳 -->
+                <footer class="bg-white border-t border-slate-200 mt-auto py-6 shrink-0">
+                    <div class="max-w-7xl mx-auto px-4 text-center">
+                        <p class="text-slate-500 text-sm">© <span id="year"></span> <a href="https://huobest.com/" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:underline">霍家私塾</a>. All rights reserved.</p>
+                    </div>
+                </footer>
+            </section>
+        </main>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // UI Elements
+        const addBtn = document.getElementById('add-btn');
+        const fileUpload = document.getElementById('file-upload');
+        const clearBtn = document.getElementById('clear-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        
+        const downloadMenuBtn = document.getElementById('download-menu-btn');
+        const downloadDropdown = document.getElementById('download-dropdown');
+        const downloadOptions = document.querySelectorAll('.download-option');
+        const downloadArrow = document.getElementById('download-arrow');
+        
+        const thumbnailGrid = document.getElementById('thumbnail-grid');
+        const thumbnailPlaceholder = document.getElementById('thumbnail-placeholder');
+        const outputPanel = document.getElementById('output-panel');
+        const outputPlaceholder = document.getElementById('output-placeholder');
+        const displayModeBtns = document.querySelectorAll('.display-mode-btn');
+        const processingStatus = document.getElementById('processing-status');
+        const statusText = document.getElementById('status-text');
+        
+        // Drag & Drop Elements
+        const dragOverlay = document.getElementById('drag-overlay');
+        const appContainer = document.getElementById('app');
+        
+        // Footer Year
+        document.getElementById('year').textContent = new Date().getFullYear();
+
+        // State Variables
+        let fileData = []; 
+        let currentDisplayMode = 'txt';
+        let uniqueId = 0;
+        let processingCount = 0;
+        let downloadCounter = 0;
+        
+        // Control Flags
+        let isStopRequested = false;
+        let abortController = null; // 用於取消 fetch 請求
+
+        // --- Event Listeners ---
+
+        // File Upload Trigger
+        const triggerUpload = () => fileUpload.click();
+        addBtn.addEventListener('click', triggerUpload);
+        thumbnailPlaceholder.addEventListener('click', triggerUpload); // Make placeholder clickable
+
+        fileUpload.addEventListener('change', (e) => handleFileSelect(e.target.files));
+
+        // Clear All
+        clearBtn.addEventListener('click', clearAllData);
+
+        // Stop Processing
+        stopBtn.addEventListener('click', stopProcessing);
+
+        // Download Menu Toggle
+        downloadMenuBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isHidden = downloadDropdown.classList.contains('hidden');
+            if (isHidden) {
+                downloadDropdown.classList.remove('hidden');
+                downloadArrow.classList.add('rotate-180');
+            } else {
+                closeDownloadMenu();
+            }
+        });
+
+        // Close download menu when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!downloadMenuBtn.contains(e.target) && !downloadDropdown.contains(e.target)) {
+                closeDownloadMenu();
+            }
+        });
+
+        // Download Options
+        downloadOptions.forEach(opt => {
+            opt.addEventListener('click', (e) => {
+                const format = e.currentTarget.dataset.format;
+                handleDownload(format);
+                closeDownloadMenu();
+            });
+        });
+
+        // Display Mode Toggle
+        displayModeBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                currentDisplayMode = e.target.dataset.mode;
+                updateDisplayModeUI();
+                renderOutput();
+            });
+        });
+
+        // Selection Checkbox
+        thumbnailGrid.addEventListener('change', (e) => {
+            if (e.target.type === 'checkbox') {
+                const id = parseInt(e.target.dataset.id);
+                const data = fileData.find(f => f.id === id);
+                if (data) {
+                    data.selected = e.target.checked;
+                    renderThumbnails();
+                    renderOutput();
+                    updateDownloadButtonState();
+                }
+            }
+        });
+        
+        // --- Drag & Drop Implementation ---
+        let dragCounter = 0;
+
+        document.body.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            dragCounter++;
+            if (dragCounter === 1) {
+                dragOverlay.classList.remove('hidden');
+            }
+        });
+
+        document.body.addEventListener('dragover', (e) => {
+            e.preventDefault(); // 必須阻止預設行為才能觸發 drop
+        });
+
+        document.body.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter === 0) {
+                dragOverlay.classList.add('hidden');
+            }
+        });
+
+        document.body.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dragCounter = 0;
+            dragOverlay.classList.add('hidden');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files);
+            }
+        });
+
+        // --- Core Functions ---
+
+        async function handleFileSelect(files) {
+            if (!files || files.length === 0) return;
+
+            // 如果之前按過停止，上傳新檔案時要重置
+            isStopRequested = false;
+            
+            // 轉為陣列以便使用 for...of
+            const fileArray = Array.from(files);
+
+            for (const file of fileArray) {
+                if (isStopRequested) break; // 停止處理檢查
+
+                if (file.type === 'application/pdf') {
+                    await processPDF(file);
+                } else if (file.type.startsWith('image/')) {
+                    await processImageFile(file);
+                }
+            }
+            // Reset input
+            fileUpload.value = null; 
+        }
+
+        function clearAllData() {
+            // 強制停止任何進行中的動作，不管狀態計數如何
+            forceStopAndReset();
+            
+            // 清空資料
+            fileData = [];
+            
+            // 重置 UI
+            renderThumbnails();
+            renderOutput();
+            updateDownloadButtonState();
+            
+            // 重置計數器
+            downloadCounter = 0;
+        }
+
+        // 強制停止邏輯
+        function forceStopAndReset() {
+             isStopRequested = true;
+             if (abortController) {
+                abortController.abort();
+                abortController = null;
+            }
+            // 強制重置計數與 UI
+            processingCount = 0;
+            updateProcessingStatus();
+        }
+
+        function stopProcessing() {
+            // 使用者手動停止
+            isStopRequested = true;
+            if (abortController) {
+                abortController.abort(); // 取消正在進行的 API 請求
+                abortController = null;
+            }
+            
+            // 更新 UI 顯示已停止
+            statusText.textContent = "已停止處理";
+            
+            // 延遲一下讓使用者看到「已停止」，然後將剩餘的 loading 轉為 error
+            setTimeout(() => {
+                fileData.forEach(f => {
+                    if (f.status === 'loading') {
+                        f.status = 'error';
+                        f.text = '使用者已取消處理';
+                    }
+                });
+                processingCount = 0;
+                updateProcessingStatus();
+                renderThumbnails();
+            }, 300);
+        }
+
+        function closeDownloadMenu() {
+            downloadDropdown.classList.add('hidden');
+            downloadArrow.classList.remove('rotate-180');
+        }
+
+        function updateProcessingStatus() {
+            if (processingCount > 0) {
+                statusText.textContent = `處理中... (${processingCount} 個項目)`;
+                processingStatus.classList.remove('hidden');
+                stopBtn.classList.remove('hidden'); // 顯示停止按鈕
+            } else {
+                processingStatus.classList.add('hidden');
+                stopBtn.classList.add('hidden'); // 隱藏停止按鈕
+            }
+        }
+
+        async function processImageFile(file) {
+            if (isStopRequested) return;
+            try {
+                const base64String = await fileToBase64(file);
+                await createTask(file.name, URL.createObjectURL(file), base64String, file.type);
+            } catch (error) {
+                console.error("Error reading image file:", error);
+            }
+        }
+
+        async function processPDF(file) {
+            if (isStopRequested) return;
+            try {
+                processingCount++;
+                updateProcessingStatus();
+                
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
+                
+                for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                    // 每次迴圈開始前都嚴格檢查停止標記
+                    if (isStopRequested) {
+                        console.log("PDF processing loop broken by stop request");
+                        break; 
+                    }
+
+                    const page = await pdf.getPage(pageNum);
+                    const scale = 2.0; 
+                    const viewport = page.getViewport({ scale: scale });
+
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+
+                    await page.render({ canvasContext: context, viewport: viewport }).promise;
+
+                    const base64Data = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+                    const blob = await (await fetch(`data:image/jpeg;base64,${base64Data}`)).blob();
+                    const thumbnailUrl = URL.createObjectURL(blob);
+
+                    const pageName = `${file.name} - Page ${pageNum}`;
+                    
+                    await createTask(pageName, thumbnailUrl, base64Data, 'image/jpeg');
+                }
+
+            } catch (error) {
+                if (!isStopRequested) {
+                    console.error('Error processing PDF:', error);
+                    alert(`PDF 處理失敗: ${file.name}`);
+                }
+            } finally {
+                // 減少計數
+                if (processingCount > 0) processingCount--;
+                updateProcessingStatus();
+            }
+        }
+
+        async function createTask(name, thumbnailSrc, base64Data, mimeType) {
+            if (isStopRequested) return;
+
+            const id = uniqueId++;
+            const data = {
+                id,
+                name: name,
+                type: 'image',
+                thumbnail: thumbnailSrc,
+                text: null,
+                selected: true,
+                status: 'loading'
+            };
+            
+            fileData.push(data);
+            renderThumbnails();
+            
+            processingCount++;
+            updateProcessingStatus();
+
+            try {
+                // 建立新的 AbortController 給這個請求
+                const controller = new AbortController();
+                abortController = controller;
+
+                const extractedText = await callGeminiAPI(base64Data, mimeType, controller.signal);
+                data.text = extractedText;
+                data.status = 'done';
+            } catch (error) {
+                if (error.name === 'AbortError' || isStopRequested) {
+                    console.log('Task aborted');
+                    data.text = "已取消";
+                    data.status = 'error';
+                } else {
+                    console.error(`Error processing ${name}:`, error);
+                    data.text = "錯誤：無法轉換此內容。";
+                    data.status = 'error';
+                }
+            } finally {
+                if (processingCount > 0) processingCount--;
+                updateProcessingStatus();
+                renderThumbnails();
+                renderOutput();
+                updateDownloadButtonState();
+                abortController = null; // 重置
+            }
+        }
+        
+        async function callGeminiAPI(base64ImageData, mimeType, signal, retries = 3, delay = 2000) {
+            const apiKey = ""; // Canvas will provide the key
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{
+                    parts: [
+                        { text: "你是一個專業的文字辨識與格式化工具。請分析這張圖片中的內容，並將其轉換為結構化的 Markdown 格式。請盡力保留原始的排版，例如標題、列表、段落和表格。如果圖片中有表格，請用 Markdown 表格語法呈現。如果內容是程式碼，請用程式碼區塊標示。請直接回覆 Markdown 內容，不要有任何前言或結語。" },
+                        { inlineData: { mimeType: mimeType, data: base64ImageData } }
+                    ]
+                }]
+            };
+
+            for (let i = 0; i < retries; i++) {
+                if ((signal && signal.aborted) || isStopRequested) {
+                    throw new DOMException("Aborted", "AbortError");
+                }
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                        signal: signal // 加入 signal
+                    });
+
+                    if (response.status === 429) {
+                         throw new Error(`Rate limit exceeded`);
+                    }
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    if (result.candidates && result.candidates[0].content && result.candidates[0].content.parts[0].text) {
+                        return result.candidates[0].content.parts[0].text;
+                    } else {
+                        return "API 未返回有效的文字內容。";
+                    }
+                } catch (error) {
+                    // 如果是取消請求，直接拋出，不要重試
+                    if (error.name === 'AbortError' || isStopRequested) throw error;
+
+                    console.error(`API call attempt ${i + 1} failed:`, error);
+                    if (i === retries - 1) throw error;
+                    await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, i)));
+                }
+            }
+        }
+
+        // --- Rendering and UI Functions ---
+
+        function renderThumbnails() {
+            // 清空 Grid 內容
+            thumbnailGrid.innerHTML = '';
+            
+            // 根據是否有資料，切換 Placeholder 和 Grid 的顯示狀態
+            if (fileData.length === 0) {
+                 thumbnailPlaceholder.classList.remove('hidden');
+                 thumbnailGrid.classList.add('hidden');
+            } else {
+                thumbnailPlaceholder.classList.add('hidden');
+                thumbnailGrid.classList.remove('hidden');
+            }
+
+            fileData.forEach(data => {
+                const item = document.createElement('div');
+                item.className = `thumbnail-item rounded-lg overflow-hidden shadow-md bg-slate-50 p-2 flex flex-col gap-2 ${data.selected ? 'selected' : ''}`;
+                
+                const imageContainer = document.createElement('div');
+                imageContainer.className = 'relative aspect-video';
+
+                const img = document.createElement('img');
+                img.src = data.thumbnail;
+                img.className = 'w-full h-full object-cover'; 
+                imageContainer.appendChild(img);
+
+                if (data.status === 'loading') {
+                    const loader = document.createElement('div');
+                    loader.className = 'loader';
+                    imageContainer.appendChild(loader);
+                } else if (data.status === 'error') {
+                    const errorOverlay = document.createElement('div');
+                    errorOverlay.className = 'absolute inset-0 bg-red-500 bg-opacity-70 flex items-center justify-center text-white font-bold text-sm';
+                    errorOverlay.textContent = data.text === '已取消' ? '已取消' : '轉換失敗';
+                    imageContainer.appendChild(errorOverlay);
+                } else if (data.status === 'done') {
+                    // 成功標記
+                    const successOverlay = document.createElement('div');
+                    successOverlay.className = 'absolute bottom-1 right-1 bg-green-500 rounded-full p-1';
+                    successOverlay.innerHTML = '<svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>';
+                    imageContainer.appendChild(successOverlay);
+                }
+
+                const checkboxContainer = document.createElement('div');
+                checkboxContainer.className = 'flex items-center gap-2 text-xs text-slate-600';
+                
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.dataset.id = data.id;
+                checkbox.checked = data.selected;
+                checkbox.className = 'form-checkbox h-4 w-4 text-blue-600 rounded';
+
+                const label = document.createElement('label');
+                label.textContent = data.name;
+                label.className = 'truncate w-full';
+                label.title = data.name;
+
+                checkboxContainer.appendChild(checkbox);
+                checkboxContainer.appendChild(label);
+                
+                item.appendChild(imageContainer);
+                item.appendChild(checkboxContainer);
+                thumbnailGrid.appendChild(item);
+            });
+        }
+        
+        function renderOutput() {
+            const selectedFiles = fileData.filter(f => f.selected && f.status === 'done');
+            
+            outputPanel.innerHTML = '';
+
+            if (selectedFiles.length === 0) {
+                outputPanel.appendChild(outputPlaceholder);
+            } else {
+                let outputHTML = '';
+                selectedFiles.forEach(file => {
+                    const markdownContentEscaped = (file.text || "").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    
+                    if (currentDisplayMode === 'md') {
+                        outputHTML += `<h3 class="text-lg font-bold mt-4 mb-2 p-2 bg-slate-100 rounded border-l-4 border-blue-500 flex justify-between items-center">${file.name}</h3>`;
+                        outputHTML += `<pre class="whitespace-pre-wrap bg-gray-50 p-3 rounded-md text-sm text-slate-800">${markdownContentEscaped}</pre>`;
+                    } else {
+                        const plainText = stripMarkdown(file.text || "");
+                        const plainTextHtml = plainText.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, '<br>');
+
+                        outputHTML += `<div class="mt-4 mb-2 p-2 bg-slate-100 rounded font-semibold text-slate-700 border-l-4 border-blue-500">${file.name}</div>`;
+                        outputHTML += `<div class="p-3 text-sm text-slate-800">${plainTextHtml}</div>`;
+                    }
+                });
+                outputPanel.innerHTML = outputHTML;
+            }
+        }
+
+        function updateDisplayModeUI() {
+            displayModeBtns.forEach(btn => {
+                if (btn.dataset.mode === currentDisplayMode) {
+                    btn.classList.add('bg-blue-500', 'text-white');
+                    btn.classList.remove('text-slate-600');
+                    btn.classList.add('hover:bg-blue-600');
+                } else {
+                    btn.classList.remove('bg-blue-500', 'text-white');
+                    btn.classList.add('text-slate-600');
+                    btn.classList.remove('hover:bg-blue-600');
+                }
+            });
+        }
+        
+        function updateDownloadButtonState() {
+            const hasSelection = fileData.some(f => f.selected && f.status === 'done');
+            downloadMenuBtn.disabled = !hasSelection;
+        }
+
+        function handleDownload(format) {
+            const selectedFiles = fileData.filter(f => f.selected && f.status === 'done');
+
+            if (selectedFiles.length === 0) return;
+
+            let content = '';
+            selectedFiles.forEach(file => {
+                const fileText = file.text || "";
+
+                if (format === 'md') {
+                    content += `## ${file.name}\n\n`;
+                    content += `${fileText}\n\n---\n\n`;
+                } else {
+                    const plainText = stripMarkdown(fileText);
+                    content += `--- ${file.name} ---\n\n`;
+                    content += `${plainText}\n\n---\n\n`;
+                }
+            });
+
+            // 檔名處理：基礎檔名 + 累進計數
+            let fileNameBase = '圖轉文小幫手_結果';
+            if (downloadCounter > 0) {
+                fileNameBase += `_${downloadCounter}`;
+            }
+            // 增加計數器
+            downloadCounter++;
+
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            // 設定下載檔名
+            a.download = `${fileNameBase}.${format}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // --- Utility Functions ---
+
+        function stripMarkdown(md) {
+            if (!md) return "";
+            let text = md;
+            text = text.replace(/^(#{1,6})\s*/gm, '');
+            text = text.replace(/^([\s\t]*)([\*\-\+])\s+/gm, '$1');
+            text = text.replace(/^([\s\t]*)(\d+)\.\s+/gm, '$1');
+            text = text.replace(/^>\s*/gm, '');
+            text = text.replace(/^(-{3,}|\*{3,}|_{3,})$/gm, '');
+            text = text.replace(/!\[(.*?)\]\(.*?\)/g, '$1');
+            text = text.replace(/\[(.*?)\]\(.*?\)/g, '$1');
+            text = text.replace(/\|/g, ' '); 
+            text = text.replace(/^\s*\|?\s*:?-+:?\s*\|?\s*$/gm, '');
+            text = text.replace(/```[\s\S]*?```/g, '');
+            text = text.replace(/`([^`]+)`/g, '$1');
+            text = text.replace(/(\*\*|__)(.*?)\1/g, '$2');
+            text = text.replace(/(\*|_)(.*?)\1/g, '$2');
+            text = text.replace(/~~(.*?)~~/g, '$1');
+            text = text.replace(/\n{3,}/g, '\n\n');
+            return text.trim();
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result.split(',')[1]);
+                reader.onerror = error => reject(error);
+            });
+        }
+    });
+    </script>
+</body>
+</html>
