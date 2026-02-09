@@ -90,11 +90,11 @@
         <!-- 第一部份：固定標頭 -->
         <header class="header shadow-md p-4 flex justify-between items-center shrink-0 z-20 relative">
             <div class="flex items-center gap-4">
-                <h1 class="text-2xl font-bold text-slate-700">圖轉文小幫手 <span class="text-xs font-normal text-slate-400 align-middle">v1.4.0</span></h1>
+                <h1 class="text-2xl font-bold text-slate-700">圖轉文小幫手 <span class="text-xs font-normal text-slate-400 align-middle">v1.4.2</span></h1>
                 <div class="flex items-center gap-2">
                     <input type="file" id="file-upload" class="hidden" multiple accept="image/*,application/pdf">
                     
-                    <!-- 新增檔案按鈕 (取代原本的大按鈕) -->
+                    <!-- 新增檔案按鈕 -->
                     <button id="add-btn" class="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg transition-transform duration-200 active:scale-95 shadow-sm" title="新增檔案">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
@@ -132,18 +132,17 @@
                 <!-- 下載按鈕組 -->
                 <div class="relative group">
                     <button id="download-menu-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition-transform duration-200 active:scale-95 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2" disabled>
-                        <span>下載結果</span>
+                        <span>下載</span>
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform duration-200" id="download-arrow" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                         </svg>
                     </button>
                     <!-- 下載選單 (隱藏/顯示) -->
                     <div id="download-dropdown" class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-slate-100 py-1">
-                        <button class="download-option w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center justify-between" data-format="md">
+                        <button class="download-option w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 whitespace-nowrap" data-format="md">
                             下載 Markdown (.md)
-                            <span class="text-xs bg-slate-100 text-slate-500 px-1 rounded">預設</span>
                         </button>
-                        <button class="download-option w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100" data-format="txt">
+                        <button class="download-option w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 whitespace-nowrap" data-format="txt">
                             下載純文字 (.txt)
                         </button>
                     </div>
@@ -156,7 +155,7 @@
             <!-- 第二部份：左側縮圖區 -->
             <aside id="thumbnail-panel" class="w-1/4 bg-white p-4 rounded-xl shadow-lg overflow-y-auto flex flex-col relative">
                 
-                <!-- Placeholder 獨立出來，不放在 thumbnail-grid 內，避免被 innerHTML='' 清除 -->
+                <!-- Placeholder -->
                 <div id="thumbnail-placeholder" class="absolute inset-0 z-10 bg-white p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50 transition-colors rounded-xl">
                     <div class="border-2 border-dashed border-slate-300 rounded-xl p-8 w-full h-full flex flex-col items-center justify-center pointer-events-none">
                         <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-12 w-12 mb-2 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
@@ -179,9 +178,11 @@
             <section class="w-3/4 bg-white p-4 rounded-xl shadow-lg flex flex-col">
                 <div class="flex justify-between items-center mb-4 pb-2 border-b">
                     <span class="text-lg font-bold text-slate-700">轉換結果</span>
+                    <!-- 修改後的切換按鈕區塊 -->
                     <div class="flex items-center bg-slate-200 rounded-lg p-1">
-                        <button data-mode="txt" class="display-mode-btn bg-blue-500 text-white rounded-md py-1 px-3 text-sm font-semibold transition-colors">純文字 (TXT)</button>
-                        <button data-mode="md" class="display-mode-btn text-slate-600 hover:text-slate-800 rounded-md py-1 px-3 text-sm font-semibold transition-colors">Markdown (MD)</button>
+                        <!-- w-36 設定固定寬度以確保兩者等寬 -->
+                        <button data-mode="md" class="display-mode-btn bg-blue-500 text-white w-36 rounded-md py-1 px-3 text-sm font-semibold transition-colors">Markdown (MD)</button>
+                        <button data-mode="txt" class="display-mode-btn text-slate-600 hover:text-slate-800 w-36 rounded-md py-1 px-3 text-sm font-semibold transition-colors">純文字 (TXT)</button>
                     </div>
                 </div>
                 <div id="output-panel" class="flex-1 overflow-y-auto pr-2">
@@ -233,7 +234,7 @@
 
         // State Variables
         let fileData = []; 
-        let currentDisplayMode = 'txt';
+        let currentDisplayMode = 'md'; // 預設改為 Markdown
         let uniqueId = 0;
         let processingCount = 0;
         let downloadCounter = 0;
